@@ -122,7 +122,12 @@ public class ChatServiceImpl implements ChatService {
         Set<String> calledTools = new HashSet<>();
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             System.out.println("🔄 Iteration " + (i + 1) + " — files in context: " + seenFiles.size());
-            bedrockResponse = callBedrockWithRetry(runningPrompt, new ArrayList<>(seenFiles.values()), history);
+//            bedrockResponse = callBedrockWithRetry(runningPrompt, new ArrayList<>(seenFiles.values()), history);
+            bedrockResponse = bedrockService.chat(
+                    runningPrompt,
+                    new ArrayList<>(seenFiles.values()),
+                    history
+            );
             String responseText = bedrockResponse.explanation();
             String toolJson = extractToolJson(responseText);
             if (toolJson == null || !toolJson.contains("\"tool\"")) {
@@ -133,8 +138,7 @@ public class ChatServiceImpl implements ChatService {
             if (calledTools.contains(toolJson)) {
                 System.out.println("⚠️ Same tool called twice — forcing final answer");
 
-                runningPrompt = request.getMessage()
-                        + "\n\nYou already have all required files. Return final JSON.";
+                runningPrompt += "\n\nYou already have all required files. Return final JSON.";
 
                 calledTools.clear();
                 continue;
@@ -142,8 +146,7 @@ public class ChatServiceImpl implements ChatService {
             if (seenFiles.size() > 8) {
                 System.out.println("🚫 Enough context gathered — stopping tool calls");
 
-                runningPrompt = request.getMessage()
-                        + "\n\nYou now have enough context. Return final JSON.";
+                runningPrompt += "\n\nYou now have enough context. Return final JSON.";
                 continue;
             }
             calledTools.add(toolJson);
@@ -159,7 +162,7 @@ public class ChatServiceImpl implements ChatService {
                         + "Found " + matched.size() + " file(s). "
                         + "Their content is included in the PROJECT FILES above:\n"
                         + matched.stream().map(FileDto::getPath).collect(Collectors.joining("\n"));
-                runningPrompt = request.getMessage() + "\n\n" + toolResult;
+                runningPrompt += "\n\n" + toolResult;
             }
             else if (toolJson.contains("read_files")) {
                 List<String> paths = extractPaths(toolJson);
@@ -173,7 +176,7 @@ public class ChatServiceImpl implements ChatService {
                 }
                 String toolResult = "TOOL RESULT (read_files): "
                         + "File content is included in PROJECT FILES above.";
-                runningPrompt = request.getMessage() + "\n\n" + toolResult;
+                runningPrompt  += "\n\n" + toolResult;
             }
             else {
                 System.out.println("⚠️ Unknown tool call, stopping loop: " + toolJson);

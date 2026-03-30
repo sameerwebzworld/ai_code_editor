@@ -12,6 +12,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
@@ -39,6 +40,11 @@ public class BedrockServiceImpl implements BedrockService {
                         StaticCredentialsProvider.create(
                                 AwsBasicCredentials.create(accessKey, secretKey)
                         )
+                )
+                .httpClientBuilder(
+                        ApacheHttpClient.builder()
+                                .socketTimeout(Duration.ofSeconds(120))
+                                .connectionTimeout(Duration.ofSeconds(60))
                 )
                 .overrideConfiguration(ClientOverrideConfiguration.builder()
                         .apiCallTimeout(Duration.ofSeconds(360))
@@ -108,6 +114,7 @@ public class BedrockServiceImpl implements BedrockService {
                     .build();
             InvokeModelResponse response = bedrockClient.invokeModel(invokeRequest);
             String responseBody = response.body().asUtf8String();
+            System.out.println("🧠 RAW AI RESPONSE:\n" + responseBody);
             return parseBedrockResponse(responseBody, files);
         } catch (Exception e) {
             throw new RuntimeException("Bedrock call failed: " + e.getMessage(), e);
@@ -126,11 +133,24 @@ public class BedrockServiceImpl implements BedrockService {
                 To search: { "tool": "find_files", "query": "navbar" }
                 To read:   { "tool": "read_files", "paths": ["src/components/Navbar.jsx"] }
                 
-                ⚠️ TOOL RULES:
-                - If PROJECT FILES are insufficient → MUST call tools
-                - Prefer using tools instead of guessing
-                - Call ONE tool at a time
-                - Return ONLY the tool JSON, nothing else
+                ⚠️ TOOL RULES (STRICT):
+                
+                - You are given PARTIAL project files (may be incomplete).
+                - If you are NOT 100% sure → MUST call tools.
+                - DO NOT guess missing code.
+                - ALWAYS prefer calling tools before answering.
+                
+                - Use find_files to search
+                - Use read_files to read full file
+                
+                - Call ONLY ONE tool at a time
+                - Return ONLY tool JSON (no explanation)
+                
+                EXAMPLES:
+                
+                { "tool": "find_files", "query": "navbar" }
+                
+                { "tool": "read_files", "paths": ["src/components/Navbar.jsx"] }
                 ─────────────────────────────────────────
                 FINAL ANSWER FORMAT:
                 
