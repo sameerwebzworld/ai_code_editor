@@ -82,6 +82,7 @@ public class FileServiceImpl implements FileService {
     public List<FileDto> loadProjectFiles(String folderPath,String message) {
         List<FileDto> files = new ArrayList<>();
         try {
+            System.out.println("FOLDER PATH = " + folderPath);
             Files.walk(Paths.get(folderPath))
                     .filter(Files::isRegularFile)
                     .forEach(path -> {

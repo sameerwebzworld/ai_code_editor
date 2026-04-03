@@ -45,6 +45,7 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/swagger-ui.html"
                         ).permitAll()
+                        .requestMatchers("/apiv1/chat/**").permitAll()
                         .anyRequest().authenticated())
         ;
         httpSecurity.exceptionHandling(auth -> auth.authenticationEntryPoint(authEntryPointJwt));

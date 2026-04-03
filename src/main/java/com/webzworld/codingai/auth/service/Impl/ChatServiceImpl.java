@@ -1,18 +1,22 @@
 package com.webzworld.codingai.auth.service.Impl;
 
-import com.webzworld.codingai.auth.dto.ChatRequestDto;
-import com.webzworld.codingai.auth.dto.ChatResponseDto;
-import com.webzworld.codingai.auth.dto.FileDto;
-import com.webzworld.codingai.auth.dto.MessageDto;
+import com.webzworld.codingai.auth.dto.*;
 import com.webzworld.codingai.auth.entity.Conversation;
+import com.webzworld.codingai.auth.entity.Folder;
 import com.webzworld.codingai.auth.entity.Message;
+import com.webzworld.codingai.auth.repo.ConversationRepository;
+import com.webzworld.codingai.auth.repo.FolderRepository;
 import com.webzworld.codingai.auth.repo.MessageRepository;
 import com.webzworld.codingai.auth.service.ChatService;
 import com.webzworld.codingai.auth.service.FileService;
+import com.webzworld.codingai.auth.utils.SmartChunker;
 import com.webzworld.codingai.auth.utils.SmartFileSelector;
 import org.springframework.stereotype.Service;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,20 +27,20 @@ public class ChatServiceImpl implements ChatService {
     private final BedrockServiceImpl bedrockService;
     private final FileService fileService;
     private final SmartFileSelector smartFileSelector;
+    private final FolderRepository folderRepository;
+    private final ConversationRepository conversationRepository;
 
     private static final int HISTORY_LIMIT = 10;
     private static final int MAX_ITERATIONS = 5;
 
-    public ChatServiceImpl(SmartFileSelector smartFileSelector,
-                           ConversationServiceImpl conversationService,
-                           MessageRepository messageRepository,
-                           BedrockServiceImpl bedrockService,
-                           FileService fileService) {
-        this.smartFileSelector = smartFileSelector;
+    public ChatServiceImpl(ConversationServiceImpl conversationService, MessageRepository messageRepository, BedrockServiceImpl bedrockService, FileService fileService, SmartFileSelector smartFileSelector, FolderRepository folderRepository, ConversationRepository conversationRepository) {
         this.conversationService = conversationService;
         this.messageRepository = messageRepository;
         this.bedrockService = bedrockService;
         this.fileService = fileService;
+        this.smartFileSelector = smartFileSelector;
+        this.folderRepository = folderRepository;
+        this.conversationRepository = conversationRepository;
     }
 
     private BedrockServiceImpl.BedrockResponse callBedrockWithRetry(
@@ -84,8 +88,9 @@ public class ChatServiceImpl implements ChatService {
             String title = request.getMessage().length() > 60
                     ? request.getMessage().substring(0, 60) + "..."
                     : request.getMessage();
-            conversation = conversationService.create(userId, title, request.getFolderPath());
+            conversation = conversationService.create(userId, title, request.getFolderId(),request.getFolderPath());
         }
+        System.out.println("Conversation folderPath = " + conversation.getFolderPath());
         List<FileDto> allFiles = fileService.loadProjectFiles(conversation.getFolderPath(),request.getMessage());
         System.out.println("📂 Total project files: " + allFiles.size());
         System.out.println("🗂 Chunks being sent to AI:");
@@ -122,12 +127,25 @@ public class ChatServiceImpl implements ChatService {
         Set<String> calledTools = new HashSet<>();
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             System.out.println("🔄 Iteration " + (i + 1) + " — files in context: " + seenFiles.size());
-//            bedrockResponse = callBedrockWithRetry(runningPrompt, new ArrayList<>(seenFiles.values()), history);
-            bedrockResponse = bedrockService.chat(
-                    runningPrompt,
+            SmartChunker chunker = new SmartChunker();
+            List<FileDto> chunkedFiles = chunker.chunkFiles(
                     new ArrayList<>(seenFiles.values()),
+                    request.getMessage()
+            );
+            System.out.println("📦 Sending CHUNKED files to AI:");
+            for (FileDto f : chunkedFiles) {
+                System.out.println("➡ " + f.getPath() + " (" + f.getContent().length() + " chars)");
+            }
+            bedrockResponse = callBedrockWithRetry(
+                    runningPrompt,
+                    chunkedFiles,
                     history
             );
+//            bedrockResponse = bedrockService.chat(
+//                    runningPrompt,
+//                    new ArrayList<>(seenFiles.values()),
+//                    history
+//            );
             String responseText = bedrockResponse.explanation();
             String toolJson = extractToolJson(responseText);
             if (toolJson == null || !toolJson.contains("\"tool\"")) {
@@ -163,6 +181,56 @@ public class ChatServiceImpl implements ChatService {
                         + "Their content is included in the PROJECT FILES above:\n"
                         + matched.stream().map(FileDto::getPath).collect(Collectors.joining("\n"));
                 runningPrompt += "\n\n" + toolResult;
+            }
+            else if (toolJson.contains("run_command")) {
+                String cmd = extractField(toolJson, "cmd");
+                String workDir = conversation.getFolderPath();
+                if (cmd == null || cmd.isBlank()) {
+                    System.out.println("⚠️ Invalid run_command: missing cmd");
+                    continue;
+                }
+                try {
+                    if (cmd.contains("rm ") || cmd.contains("del ") || cmd.contains("shutdown")) {
+                        System.out.println("🚫 Dangerous command blocked: " + cmd);
+                        continue;
+                    }
+                    ProcessBuilder pb;
+
+                    if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                        pb = new ProcessBuilder("cmd.exe", "/c", cmd);
+                    } else {
+                        pb = new ProcessBuilder("bash", "-c", cmd);
+                    }
+                    pb.directory(new File(workDir));
+                    pb.redirectErrorStream(true);
+                    Process p = pb.start();
+                    String output = new String(p.getInputStream().readAllBytes());
+                    boolean finished = p.waitFor(120, TimeUnit.SECONDS);
+                    if (!finished) {
+                        p.destroyForcibly();
+                        output += "\n⚠️ Command timed out.";
+                    }
+//                    runningPrompt += "\n\nTOOL RESULT (run_command): "
+//                            + output.substring(0, Math.min(2000, output.length()));
+                    runningPrompt += "\n\nTOOL RESULT:\n" + output +
+                            "\n\nBased on this result, decide next step:\n" +
+                            "- If dependencies missing → run npm install\n" +
+                            "- If project not started → run npm run dev\n" +
+                            "- If setup complete → return final JSON\n";
+                    // Reload project files after command runs
+                    allFiles = fileService.loadProjectFiles(workDir, request.getMessage());
+                    seenFiles.clear();
+                    for (FileDto f : allFiles) {
+                        seenFiles.put(f.getPath(), f);
+                    }
+                } catch (IOException e) {
+                    System.out.println("❌ IO Error running command: " + e.getMessage());
+                    runningPrompt += "\n\nTOOL RESULT: Failed to execute command (IO error).";
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt(); // good practice
+                    System.out.println("❌ Command interrupted: " + e.getMessage());
+                    runningPrompt += "\n\nTOOL RESULT: Command interrupted.";
+                }
             }
             else if (toolJson.contains("read_files")) {
                 List<String> paths = extractPaths(toolJson);
@@ -236,6 +304,29 @@ public class ChatServiceImpl implements ChatService {
                 .collect(Collectors.toList());
     }
 
+    @Override
+    public List<FolderDto> getSidebarData(String userId) {
+        List<Folder> folders = folderRepository.findByUserId(userId);
+        return folders.stream().map(folder -> {
+            List<Conversation> conversations =
+                    conversationRepository.findByFolderId(folder.getId());
+            List<ConversationDto> convDtos = conversations.stream()
+                    .map(c -> new ConversationDto(
+                            c.getId(),
+                            c.getTitle(),
+                            c.getFolderPath(),
+                            c.getCreatedAt(),
+                            c.getUpdatedAt()
+                    ))
+                    .toList();
+            return new FolderDto(
+                    folder.getId(),
+                    folder.getName(),
+                    convDtos,
+                    folder.getPath()
+            );
+        }).toList();
+    }
     // ── JSON extraction helpers ───────────────────────────────────────────────
 
     private String extractToolJson(String text) {
@@ -279,6 +370,20 @@ public class ChatServiceImpl implements ChatService {
             if (!p.isEmpty()) paths.add(p);
         }
         return paths;
+    }
+
+    private String extractField(String json, String fieldName) {
+        try {
+            String pattern = "\"" + fieldName + "\"\\s*:\\s*\"([^\"]+)\"";
+            java.util.regex.Pattern r = java.util.regex.Pattern.compile(pattern);
+            java.util.regex.Matcher m = r.matcher(json);
+            if (m.find()) {
+                return m.group(1);
+            }
+        } catch (Exception e) {
+            System.out.println("⚠️ Failed to extract field '" + fieldName + "' from: " + json);
+        }
+        return null;
     }
 }
 

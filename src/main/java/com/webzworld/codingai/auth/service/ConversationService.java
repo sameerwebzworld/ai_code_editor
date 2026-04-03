@@ -11,7 +11,7 @@ public interface ConversationService {
 
     ConversationDto getByIdAndUserId(String id, String userId);
 
-    Conversation create(String userId, String title, String folderPath);
+    Conversation create(String userId, String title,String folderId, String folderPath);
 
     ConversationDto updateTitle(String id, String userId, String newTitle);
 

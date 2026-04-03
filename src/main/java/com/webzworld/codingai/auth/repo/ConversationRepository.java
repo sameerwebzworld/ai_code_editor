@@ -24,4 +24,6 @@ public interface ConversationRepository extends JpaRepository<Conversation, Stri
     @Transactional
     @Query("DELETE FROM Conversation c WHERE c.userId = :userId")
     void deleteAllByUserId(@Param("userId") String userId);
+
+    List<Conversation> findByFolderId(String folderId);
 }

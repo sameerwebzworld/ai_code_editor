@@ -36,10 +36,11 @@ public class ConversationServiceImpl implements ConversationService {
         return toDto(conv);
     }
 
-    public Conversation create(String userId, String title, String folderPath) {
+    public Conversation create(String userId, String title,String folderId, String folderPath) {
         Conversation conv = new Conversation();
         conv.setUserId(userId);
         conv.setTitle(title);
+        conv.setFolderId(folderId);
         conv.setFolderPath(folderPath);
         return conversationRepository.save(conv);
     }

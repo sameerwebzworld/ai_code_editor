@@ -13,6 +13,7 @@ import java.util.List;
 public class ChatRequestDto {
 
     private String conversationId;
+    private String folderId;
     private String folderPath;
 
     @NotNull(message = "message is required")

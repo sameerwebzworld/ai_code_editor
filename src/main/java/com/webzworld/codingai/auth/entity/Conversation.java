@@ -31,6 +31,8 @@ public class Conversation {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    private String folderId;
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
