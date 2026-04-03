@@ -1,6 +1,7 @@
 package com.webzworld.codingai.auth.service;
 
 import com.webzworld.codingai.auth.dto.FileDto;
+import com.webzworld.codingai.auth.service.Impl.BedrockServiceImpl;
 
 import java.util.List;
 

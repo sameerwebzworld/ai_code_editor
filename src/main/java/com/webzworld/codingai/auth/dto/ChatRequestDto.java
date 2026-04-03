@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Getter
@@ -20,6 +21,6 @@ public class ChatRequestDto {
     @NotBlank(message = "message cannot be blank")
     private String message;
 
-    @NotNull(message = "files list is required")
-    private List<FileDto> files;
+//    @NotNull(message = "files list is required")
+    private List<FileDto> files = new ArrayList<>();
 }
