@@ -71,10 +71,6 @@ public class ChatController {
         this.chatService = chatService;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // ORIGINAL endpoint — completely unchanged, still works
-    // ─────────────────────────────────────────────────────────────────────────
-
     @PostMapping("/message")
     public ResponseEntity<ChatResponseDto> sendMessage(
             @Valid @RequestBody ChatRequestDto request,
@@ -83,37 +79,12 @@ public class ChatController {
         return ResponseEntity.ok(response);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // NEW streaming endpoint
-    //
-    // POST /apiv1/chat/message/stream
-    //
-    // Returns text/event-stream (SSE).
-    // Events emitted in order:
-    //   status       → tool-call status messages
-    //   text_chunk   → AI explanation text fragments (stream these to UI)
-    //   changed_files→ final list of files to write (only if any changed)
-    //   done         → conversationId + message IDs (signals completion)
-    //   error        → if something goes wrong
-    //
-    // Test in Postman:
-    //   Method: POST
-    //   URL: /apiv1/chat/message/stream
-    //   Body: same JSON as /message
-    //   Headers: Authorization: Bearer <token>
-    //   You will see events arrive one by one in the response panel.
-    // ─────────────────────────────────────────────────────────────────────────
-
     @PostMapping(value = "/message/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter sendMessageStream(
             @Valid @RequestBody ChatRequestDto request,
             @AuthenticationPrincipal User user) {
         return chatService.sendMessageStream(request, user.getId());
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Existing endpoints — unchanged
-    // ─────────────────────────────────────────────────────────────────────────
 
     @GetMapping("/history/{conversationId}")
     public ResponseEntity<List<MessageDto>> getHistory(
